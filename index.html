@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Boston Biotech Event Map</title>
+  <meta name="description" content="See upcoming Boston‑area biotech & life sciences events on a live map. Filter by type and date; add to calendar in one click." />
+  <link rel="preconnect" href="https://unpkg.com" crossorigin>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous"/>
+  <style>
+    :root{--bg:#0b1020;--panel:#0f1530;--ink:#e8edff;--muted:#9db0ff;--line:#202848;--brand:#7aa2ff;--good:#30dd89}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    header{padding:16px 18px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    header h1{margin:0;font-size:18px}
+    header .tag{color:var(--muted);font-size:12px}
+    main{display:grid;grid-template-columns:340px 1fr;gap:0;height:calc(100vh - 58px)}
+    @media (max-width:960px){main{grid-template-columns:1fr;grid-template-rows:320px 1fr;height:auto}}
+    .sidebar{background:var(--panel);border-right:1px solid var(--line);padding:14px;overflow:auto}
+    .group{margin-bottom:14px}
+    .group h3{margin:0 0 8px;font-size:13px;color:var(--muted);letter-spacing:.2px}
+    input,select,button{background:#10183a;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:8px 10px;font-weight:600}
+    input::placeholder{color:#7f91d4}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .checkboxes{display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:6px}
+    label.cb{display:flex;align-items:center;gap:8px;background:#0c1230;border:1px solid var(--line);border-radius:10px;padding:6px 8px;font-size:13px}
+    .muted{color:var(--muted);font-size:12px}
+    .btn{cursor:pointer}
+    .btn.primary{background:var(--brand);border-color:transparent;color:#0a0f22}
+    .btn.ghost{background:transparent}
+    #map{width:100%;height:100%}
+    .card{background:#0c1230;border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px}
+    .event-list{max-height:240px;overflow:auto}
+    .event{padding:8px;border-bottom:1px dashed var(--line)}
+    .event:last-child{border-bottom:none}
+    .event a{color:var(--brand);text-decoration:none}
+    .pill{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--muted)}
+    .legend{display:flex;gap:6px;flex-wrap:wrap}
+    .legend .swatch{width:10px;height:10px;border-radius:2px;display:inline-block;margin-right:6px}
+    .tiny{font-size:11px}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Boston Biotech Event Map</h1>
+      <div class="tag">Meetups • Talks • Hiring • Workshops — updated from a simple sheet</div>
+    </div>
+    <div class="row">
+      <button class="btn ghost" id="shareLink">Share current view</button>
+      <a id="githubLink" class="btn" href="#" target="_blank" style="display:none">GitHub</a>
+    </div>
+  </header>
+  <main>
+    <aside class="sidebar">
+      <div class="group">
+        <h3>Data source</h3>
+        <div class="row">
+          <input id="csvUrl" type="url" placeholder="Paste published Google Sheet CSV URL" style="flex:1" />
+          <button id="loadCsv" class="btn">Load</button>
+        </div>
+        <div class="muted tiny">Use a Google Sheet with headers: <span class="pill">title</span> <span class="pill">date</span> <span class="pill">start_time</span> <span class="pill">end_time</span> <span class="pill">venue</span> <span class="pill">address</span> <span class="pill">lat</span> <span class="pill">lng</span> <span class="pill">type</span> <span class="pill">link</span> <span class="pill">description</span></div>
+      </div>
+
+      <div class="group">
+        <h3>Date range</h3>
+        <div class="row">
+          <select id="dateRange">
+            <option value="week">This week</option>
+            <option value="month" selected>Next 30 days</option>
+            <option value="all">All upcoming</option>
+          </select>
+          <input id="afterDate" type="date" />
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>Type</h3>
+        <div class="checkboxes" id="typeChecks"></div>
+        <div class="legend tiny" id="legend"></div>
+      </div>
+
+      <div class="group">
+        <h3>Neighborhood</h3>
+        <div class="checkboxes" id="hoodChecks"></div>
+      </div>
+
+      <div class="group">
+        <h3>Events</h3>
+        <div class="event-list" id="eventList"></div>
+      </div>
+
+      <div class="group card">
+        <h3>Add an event</h3>
+        <div class="muted tiny">Use this form to submit an event; it will populate the sheet:</div>
+        <div class="row" style="margin-top:8px">
+          <a class="btn primary" id="formLink" target="_blank">Open submission form</a>
+          <button class="btn" id="copyTemplate">Copy CSV template</button>
+        </div>
+      </div>
+
+      <div class="muted tiny">Tip: publish a Google Sheet to the web (File → Share → Publish to web → CSV) and paste the URL above.</div>
+    </aside>
+    <section id="map"></section>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+  <script>
+  // ---------- Config ----------
+  const TYPES = {
+    "Networking":"#7aa2ff",
+    "Hiring":"#30dd89",
+    "Talk":"#ffcd55",
+    "Workshop":"#ff8a4d",
+    "Hackathon":"#e16eff",
+    "Social":"#a3b3ff"
+  };
+  const HOODS = ["Cambridge","Kendall","Seaport","Waltham","Longwood","Somerville","Allston","Boston" ];
+
+  // Optional: set your public Google Form link here
+  const SUBMIT_FORM_URL = "https://docs.google.com/forms"; // replace with your actual form
+  document.getElementById('formLink').href = SUBMIT_FORM_URL;
+
+  // If provided via URL params
+  const params = new URLSearchParams(location.search);
+  const sheetUrlParam = params.get('csv');
+  if (sheetUrlParam) document.getElementById('csvUrl').value = sheetUrlParam;
+
+  // ---------- Map ----------
+  const map = L.map('map').setView([42.361145, -71.057083], 12); // Boston-ish
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
+
+  const markers = [];
+
+  function colorMarker(color){
+    // Simple colored circle marker
+    return L.divIcon({
+      html: `<span style="display:inline-block;width:14px;height:14px;border-radius:999px;background:${color};border:2px solid rgba(0,0,0,.35);"></span>`,
+      className: "",
+      iconSize: [16,16]
+    });
+  }
+
+  // ---------- UI setup ----------
+  const typeChecks = document.getElementById('typeChecks');
+  const legend = document.getElementById('legend');
+  Object.entries(TYPES).forEach(([t,c])=>{
+    const id = `t_${t}`;
+    const label = document.createElement('label');
+    label.className = 'cb';
+    label.innerHTML = `<input type="checkbox" id="${id}" data-type="${t}" checked> ${t}`;
+    typeChecks.appendChild(label);
+
+    const sw = document.createElement('div');
+    sw.innerHTML = `<span class="swatch" style="background:${c}"></span><span class="tiny">${t}</span>`;
+    legend.appendChild(sw);
+  });
+
+  const hoodChecks = document.getElementById('hoodChecks');
+  HOODS.forEach(h=>{
+    const id = `h_${h}`;
+    const label = document.createElement('label');
+    label.className = 'cb';
+    label.innerHTML = `<input type="checkbox" id="${id}" data-hood="${h}" checked> ${h}`;
+    hoodChecks.appendChild(label);
+  });
+
+  document.getElementById('shareLink').addEventListener('click', ()=>{
+    const csv = encodeURIComponent(document.getElementById('csvUrl').value || '');
+    const url = `${location.origin}${location.pathname}?csv=${csv}`;
+    navigator.clipboard.writeText(url);
+    alert('Sharable link copied to clipboard!');
+  });
+
+  document.getElementById('copyTemplate').addEventListener('click', ()=>{
+    const template = `title,date,start_time,end_time,venue,address,lat,lng,type,link,description\n`+
+`Kendall Bio Meetup,2025-10-20,18:00,20:00,LabCentral,700 Main St,42.3662,-71.0921,Networking,https://meetup.com/example,Monthly community meetup in Kendall\n`+
+`Hiring Night @ Seaport,2025-10-22,17:30,19:30,Company HQ,1 Seaport Blvd,42.3516,-71.0446,Hiring,https://example.com,Meet teams that are hiring now\n`+
+`CRISPR Talk (Harvard),2025-10-25,16:00,17:30,Harvard Med,25 Shattuck St,42.3360,-71.1046,Talk,https://example.com,Guest lecture on gene editing\n`;
+    navigator.clipboard.writeText(template);
+    alert('CSV template copied to clipboard. Paste into your sheet.');
+  });
+
+  // ---------- Data + Filtering ----------
+  let ALL_EVENTS = [];
+
+  function parseNeighborhood(address){
+    const a=(address||'').toLowerCase();
+    if (a.includes('kendall')) return 'Kendall';
+    if (a.includes('waltham')) return 'Waltham';
+    if (a.includes('longwood')) return 'Longwood';
+    if (a.includes('seaport')) return 'Seaport';
+    if (a.includes('somerville')) return 'Somerville';
+    if (a.includes('allston')) return 'Allston';
+    if (a.includes('cambridge')) return 'Cambridge';
+    if (a.includes('boston')) return 'Boston';
+    return 'Boston';
+  }
+
+  function toDate(dateStr, timeStr){
+    const [y,m,d] = (dateStr||'').split('-').map(x=>parseInt(x,10));
+    const [hh,mm] = (timeStr||'00:00').split(':').map(x=>parseInt(x,10));
+    return new Date(y, (m-1), d, hh, mm);
+  }
+
+  function withinRange(dt){
+    const sel = document.getElementById('dateRange').value;
+    const customStart = document.getElementById('afterDate').value ? new Date(document.getElementById('afterDate').value) : null;
+    const now = new Date();
+    let end = new Date(now);
+    if (sel==='week') end.setDate(now.getDate()+7);
+    if (sel==='month') end.setDate(now.getDate()+30);
+    if (sel==='all') end.setFullYear(now.getFullYear()+5);
+    const start = customStart || now;
+    return dt >= start && dt <= end;
+  }
+
+  function activeTypes(){
+    return Array.from(typeChecks.querySelectorAll('input[type=checkbox]'))
+      .filter(c=>c.checked).map(c=>c.dataset.type);
+  }
+  function activeHoods(){
+    return Array.from(hoodChecks.querySelectorAll('input[type=checkbox]'))
+      .filter(c=>c.checked).map(c=>c.dataset.hood);
+  }
+
+  function icsFor(ev){
+    const dtStart = toDate(ev.date, ev.start_time);
+    const dtEnd = toDate(ev.date, ev.end_time || ev.start_time);
+    function fmt(d){
+      const pad=n=>String(n).padStart(2,'0');
+      return `${d.getUTCFullYear()}${pad(d.getUTCMonth()+1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}00Z`;
+    }
+    const uid = `${Date.now()}-${Math.random().toString(16).slice(2)}@bbem`;
+    const ics = `BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Boston Biotech Event Map//EN\nBEGIN:VEVENT\nUID:${uid}\nDTSTAMP:${fmt(new Date())}\nDTSTART:${fmt(dtStart)}\nDTEND:${fmt(dtEnd)}\nSUMMARY:${(ev.title||'Event').replace(/\n/g,' ')}\nLOCATION:${(ev.venue||'') + ' ' + (ev.address||'')}\nDESCRIPTION:${(ev.description||'').replace(/\n/g,' ')}\\nLink: ${(ev.link||'')}\nURL:${ev.link||''}\nEND:VEVENT\nEND:VCALENDAR`;
+    return 'data:text/calendar;charset=utf-8,' + encodeURIComponent(ics);
+  }
+
+  function clearMarkers(){ markers.forEach(m=>map.removeLayer(m)); markers.length=0; }
+
+  function render(){
+    clearMarkers();
+    const list = document.getElementById('eventList');
+    list.innerHTML = '';
+
+    const types = activeTypes();
+    const hoods = activeHoods();
+
+    const filtered = ALL_EVENTS
+      .map(e=>({
+        ...e,
+        dt: toDate(e.date, e.start_time),
+        hood: e.hood || parseNeighborhood(e.address||'')
+      }))
+      .filter(e=> e.lat && e.lng && !isNaN(e.lat) && !isNaN(e.lng))
+      .filter(e=> withinRange(e.dt))
+      .filter(e=> types.includes(e.type||'Networking'))
+      .filter(e=> hoods.includes(e.hood));
+
+    filtered.sort((a,b)=> a.dt-b.dt);
+
+    filtered.forEach(ev=>{
+      const color = TYPES[ev.type] || '#a3b3ff';
+      const marker = L.marker([ev.lat, ev.lng], {icon: colorMarker(color)}).addTo(map);
+      markers.push(marker);
+      const html = `
+        <div style="min-width:220px">
+          <div style="font-weight:800;margin-bottom:4px">${ev.title||'Event'}</div>
+          <div style="font-size:12px;color:#9db0ff">${ev.date} ${ev.start_time||''}${ev.end_time? '–'+ev.end_time:''}</div>
+          <div style="font-size:12px;margin:6px 0">${ev.venue||''}${ev.address? ' • '+ev.address:''}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+            ${ev.link? `<a href="${ev.link}" target="_blank" style="color:#7aa2ff">Event page</a>`:''}
+            <a href="${icsFor(ev)}" download="event.ics" style="color:#30dd89">Add to calendar</a>
+          </div>
+        </div>`;
+      marker.bindPopup(html);
+
+      const row = document.createElement('div');
+      row.className = 'event';
+      row.innerHTML = `
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+          <div>
+            <div style="font-weight:700">${ev.title||'Event'}</div>
+            <div class="tiny muted">${ev.date} • ${ev.start_time||''}${ev.end_time? '–'+ev.end_time:''} • ${ev.venue||''}</div>
+            <div class="tiny"><span class="pill">${ev.type||''}</span> <span class="pill">${ev.hood}</span></div>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            ${ev.link? `<a class="btn" href="${ev.link}" target="_blank">Open</a>`:''}
+            <a class="btn" href="${icsFor(ev)}" download="event.ics">.ics</a>
+            <button class="btn" onclick="window._jump(${ev.lat},${ev.lng})">Map</button>
+          </div>
+        </div>`;
+      list.appendChild(row);
+    });
+
+    if (!filtered.length){
+      const empty = document.createElement('div');
+      empty.className='muted';
+      empty.textContent = 'No events match your filters.';
+      list.appendChild(empty);
+    }
+  }
+
+  window._jump = (lat,lng)=>{
+    map.setView([lat,lng], 15);
+  }
+
+  // ---------- Loaders ----------
+  function loadFromCsv(url){
+    return new Promise((resolve,reject)=>{
+      Papa.parse(url, {
+        download:true, header:true, skipEmptyLines:true,
+        complete: (res)=> resolve(res.data),
+        error: reject
+      });
+    });
+  }
+
+  async function hydrateFromCsv(url){
+    try{
+      const rows = await loadFromCsv(url);
+      ALL_EVENTS = rows.map(r=>({
+        title: r.title?.trim(),
+        date: (r.date||'').trim(),
+        start_time: (r.start_time||'').trim(),
+        end_time: (r.end_time||'').trim(),
+        venue: (r.venue||'').trim(),
+        address: (r.address||'').trim(),
+        lat: parseFloat(r.lat),
+        lng: parseFloat(r.lng),
+        type: (r.type||'Networking').trim(),
+        link: (r.link||'').trim(),
+        description: (r.description||'').trim()
+      }));
+      render();
+    }catch(e){
+      alert('Could not load CSV. Make sure the URL is the *published* CSV link and accessible to anyone.');
+      console.error(e);
+    }
+  }
+
+  document.getElementById('loadCsv').addEventListener('click', ()=>{
+    const url = document.getElementById('csvUrl').value.trim();
+    if(!url){ alert('Paste a published Google Sheet CSV URL.'); return; }
+    const qs = new URLSearchParams(location.search);
+    qs.set('csv', url);
+    history.replaceState({}, '', `${location.pathname}?${qs}`);
+    hydrateFromCsv(url);
+  });
+
+  document.getElementById('dateRange').addEventListener('change', render);
+  document.getElementById('afterDate').addEventListener('change', render);
+  typeChecks.addEventListener('change', render);
+  hoodChecks.addEventListener('change', render);
+
+  // ---------- Sample data (fallback) ----------
+  const SAMPLE = [
+    {title:'Kendall Bio Meetup',date:'2025-10-20',start_time:'18:00',end_time:'20:00',venue:'LabCentral',address:'700 Main St, Cambridge, MA',lat:42.3662,lng:-71.0921,type:'Networking',link:'https://meetup.com',description:'Monthly community meetup in Kendall'},
+    {title:'Hiring Night @ Seaport',date:'2025-10-22',start_time:'17:30',end_time:'19:30',venue:'Company HQ',address:'1 Seaport Blvd, Boston, MA',lat:42.3516,lng:-71.0446,type:'Hiring',link:'https://example.com',description:'Meet teams that are hiring now'},
+    {title:'CRISPR Talk (Harvard)',date:'2025-10-25',start_time:'16:00',end_time:'17:30',venue:'Harvard Med',address:'25 Shattuck St, Boston, MA',lat:42.3360,lng:-71.1046,type:'Talk',link:'https://example.com',description:'Guest lecture on gene editing'},
+    {title:'Automation Workshop',date:'2025-10-28',start_time:'15:00',end_time:'17:00',venue:'Waltham Lab Park',address:'225 2nd Ave, Waltham, MA',lat:42.3978,lng:-71.2495,type:'Workshop',link:'https://example.com',description:'Hands-on lab automation tips'},
+    {title:'Somerville Social Hour',date:'2025-10-29',start_time:'18:30',end_time:'20:00',venue:'Bow Market',address:'1 Bow Market Way, Somerville, MA',lat:42.3825,lng:-71.0995,type:'Social',link:'https://example.com',description:'Casual community gathering'}
+  ];
+
+  function init(){
+    if (sheetUrlParam){ hydrateFromCsv(sheetUrlParam); }
+    else { ALL_EVENTS = SAMPLE; render(); }
+  }
+
+  init();
+  </script>
+</body>
+</html>
